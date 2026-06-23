@@ -21,6 +21,11 @@ from reportlab.platypus import (
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
+# Print-map screenshot dimensions. Keep this aspect ratio close to the PDF map frame
+# so the exported map fills the canvas without white space or vertical stretching.
+PRINT_MAP_WIDTH = 1400
+PRINT_MAP_HEIGHT = 1000
+
 # -------------------------------------------------------------
 # STREAMLIT PAGE SETUP
 # -------------------------------------------------------------
@@ -219,8 +224,8 @@ def build_print_map(hazard_mode, opacity_val=0.90):
         tiles=None,
         control_scale=True,
         zoom_control=False,
-        width="100%",
-        height="100%",
+        width=f"{PRINT_MAP_WIDTH}px",
+        height=f"{PRINT_MAP_HEIGHT}px",
     )
 
     # Cleaner print basemap than satellite hybrid.
@@ -282,12 +287,55 @@ def build_print_map(hazard_mode, opacity_val=0.90):
 
 
 def capture_print_map(print_map):
-    """Save clean print map to PNG using html2image."""
+    """
+    Save a clean print map to PNG using html2image.
+
+    The earlier version created a 1400 x 850 browser screenshot while the Folium
+    map itself was still using a smaller/default HTML height. That is what caused
+    the large white blank area at the bottom of the PDF map frame. This function
+    forces the saved Leaflet map container, browser viewport, and output image to
+    the same dimensions.
+    """
     html_path = os.path.abspath("temp_print_map.html")
     png_name = "map_snapshot_print.png"
     png_path = os.path.abspath(png_name)
 
     print_map.save(html_path)
+
+    # Force Folium/Leaflet to occupy the full screenshot viewport.
+    # This removes the blank lower area in the exported PDF map canvas.
+    with open(html_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    force_size_css = f"""
+    <style>
+        html, body {{
+            margin: 0 !important;
+            padding: 0 !important;
+            width: {PRINT_MAP_WIDTH}px !important;
+            height: {PRINT_MAP_HEIGHT}px !important;
+            overflow: hidden !important;
+            background: white !important;
+        }}
+        .folium-map, .leaflet-container {{
+            width: {PRINT_MAP_WIDTH}px !important;
+            height: {PRINT_MAP_HEIGHT}px !important;
+            min-height: {PRINT_MAP_HEIGHT}px !important;
+            max-height: {PRINT_MAP_HEIGHT}px !important;
+        }}
+        .leaflet-control-container {{
+            font-size: 11px !important;
+        }}
+    </style>
+    """
+
+    if "</head>" in html:
+        html = html.replace("</head>", force_size_css + "\n</head>")
+    else:
+        html = force_size_css + html
+
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
 
     hti = Html2Image(output_path=os.getcwd())
 
@@ -297,12 +345,10 @@ def capture_print_map(print_map):
     elif os.path.exists("/usr/bin/chromium"):
         hti.browser_executable = "/usr/bin/chromium"
 
-    # Keep this fairly large so the PDF map stays sharp.
     url = "file:///" + html_path.replace(os.sep, "/")
-    hti.screenshot(url=url, save_as=png_name, size=(1400, 850))
+    hti.screenshot(url=url, save_as=png_name, size=(PRINT_MAP_WIDTH, PRINT_MAP_HEIGHT))
 
     return png_path
-
 
 def generate_pdf_report(hazard_mode, current_coordinates=None):
     """
@@ -405,7 +451,8 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
         print_map = build_print_map(hazard_mode, opacity_val=0.90)
         map_image_path = capture_print_map(print_map)
         # Sized to fit a single landscape page together with the side panel.
-        map_img = Image(map_image_path, width=505, height=360)
+        # Aspect ratio matches PRINT_MAP_WIDTH / PRINT_MAP_HEIGHT to avoid stretching.
+        map_img = Image(map_image_path, width=505, height=361)
     except Exception as e:
         map_img = Paragraph(f"<i>Map image could not be rendered: {str(e)}</i>", compact_note_style)
 
