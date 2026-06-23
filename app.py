@@ -213,14 +213,28 @@ def build_legend_table(hazard_mode):
     return table
 
 
-def build_print_map(hazard_mode, opacity_val=0.90):
+def build_print_map(hazard_mode, opacity_val=0.90, map_view=None):
     """
     Build a separate print-only Folium map.
-    This avoids capturing interactive controls in the PDF.
+
+    map_view is optional. When provided from st_folium output, the PDF
+    respects the user's current zoomed map view instead of forcing the full
+    Papua New Guinea extent. Humans wanted WYSIWYG printing, so here we are,
+    negotiating with Leaflet like it owes us rent.
     """
+    default_center = [-6.3, 146.5]
+    default_zoom = 6
+
+    if map_view and map_view.get("center") and map_view.get("zoom"):
+        start_center = [map_view["center"][0], map_view["center"][1]]
+        start_zoom = int(map_view["zoom"])
+    else:
+        start_center = default_center
+        start_zoom = default_zoom
+
     print_map = folium.Map(
-        location=[-6.3, 146.5],
-        zoom_start=6,
+        location=start_center,
+        zoom_start=start_zoom,
         tiles=None,
         control_scale=True,
         zoom_control=False,
@@ -281,9 +295,63 @@ def build_print_map(hazard_mode, opacity_val=0.90):
     except Exception:
         pass
 
-    # Force the map to PNG extent.
-    print_map.fit_bounds([[-12.0, 141.0], [-2.0, 156.0]])
+    # Respect current zoomed map view when available; otherwise use full PNG extent.
+    if map_view and map_view.get("bounds"):
+        sw, ne = map_view["bounds"]
+        print_map.fit_bounds([sw, ne], padding=(5, 5))
+    else:
+        print_map.fit_bounds([[-12.0, 141.0], [-2.0, 156.0]], padding=(5, 5))
+
     return print_map
+
+
+def extract_map_view(folium_output):
+    """
+    Extract current map bounds, center, and zoom from st_folium output.
+
+    st_folium usually returns bounds as:
+    {
+      'bounds': {
+          '_southWest': {'lat': ..., 'lng': ...},
+          '_northEast': {'lat': ..., 'lng': ...}
+      },
+      'center': {'lat': ..., 'lng': ...},
+      'zoom': ...
+    }
+
+    This helper is defensive because web-map return objects apparently enjoy
+    changing shape when nobody is looking.
+    """
+    if not folium_output:
+        return None
+
+    try:
+        bounds_obj = folium_output.get("bounds")
+        center_obj = folium_output.get("center")
+        zoom_val = folium_output.get("zoom")
+
+        parsed_bounds = None
+        if isinstance(bounds_obj, dict):
+            sw = bounds_obj.get("_southWest") or bounds_obj.get("southWest")
+            ne = bounds_obj.get("_northEast") or bounds_obj.get("northEast")
+            if sw and ne:
+                parsed_bounds = [[float(sw["lat"]), float(sw["lng"])], [float(ne["lat"]), float(ne["lng"])]]
+        elif isinstance(bounds_obj, list) and len(bounds_obj) == 2:
+            parsed_bounds = bounds_obj
+
+        parsed_center = None
+        if isinstance(center_obj, dict):
+            parsed_center = [float(center_obj["lat"]), float(center_obj["lng"])]
+        elif isinstance(center_obj, list) and len(center_obj) == 2:
+            parsed_center = [float(center_obj[0]), float(center_obj[1])]
+
+        return {
+            "bounds": parsed_bounds,
+            "center": parsed_center,
+            "zoom": int(zoom_val) if zoom_val is not None else None,
+        }
+    except Exception:
+        return None
 
 
 def capture_print_map(print_map):
@@ -350,7 +418,7 @@ def capture_print_map(print_map):
 
     return png_path
 
-def generate_pdf_report(hazard_mode, current_coordinates=None):
+def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None):
     """
     Generate a STRICT one-page landscape PDF map report.
 
@@ -448,7 +516,7 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
 
     # Map image generated from a clean print-only map.
     try:
-        print_map = build_print_map(hazard_mode, opacity_val=0.90)
+        print_map = build_print_map(hazard_mode, opacity_val=0.90, map_view=map_view)
         map_image_path = capture_print_map(print_map)
         # Sized to fit a single landscape page together with the side panel.
         # Aspect ratio matches PRINT_MAP_WIDTH / PRINT_MAP_HEIGHT to avoid stretching.
@@ -801,9 +869,23 @@ if output and output.get("last_clicked"):
 # Add PDF generation trigger directly beneath the active analytics reporting panel.
 st.sidebar.markdown("---")
 st.sidebar.subheader("📄 Map Layout & Reporting")
+
+print_extent_mode = st.sidebar.radio(
+    "PDF Map Extent",
+    ["Current zoomed map view", "Full PNG extent"],
+    index=0,
+    help="Use the current zoomed map view when you want the PDF to print your area of interest instead of the whole PNG extent.",
+)
+
+current_map_view = extract_map_view(output)
+
+if print_extent_mode == "Current zoomed map view" and not current_map_view:
+    st.sidebar.warning("Current map view was not detected yet. Pan or zoom the map once, then generate the PDF.")
+
 if st.sidebar.button("Generate Layout Report (PDF)"):
     with st.spinner("Compiling clean cartographic print layout..."):
-        pdf_data = generate_pdf_report(hazard_type, clicked_coords)
+        selected_view = current_map_view if print_extent_mode == "Current zoomed map view" else None
+        pdf_data = generate_pdf_report(hazard_type, clicked_coords, selected_view)
         st.sidebar.download_button(
             label="💾 Download PDF Map Report",
             data=pdf_data,
