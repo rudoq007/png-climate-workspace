@@ -124,7 +124,13 @@ def generate_pdf_report(hazard_mode, folium_map, current_coordinates=None):
         html_path = os.path.abspath("temp_map.html")
         folium_map.save(html_path)
         
+        # Initialize html2image and trace linux chromium executables inside cloud containers
         hti = Html2Image()
+        if os.path.exists("/usr/bin/chromium-browser"):
+            hti.browser_executable = "/usr/bin/chromium-browser"
+        elif os.path.exists("/usr/bin/chromium"):
+            hti.browser_executable = "/usr/bin/chromium"
+            
         hti.screenshot(url=f"file:///{html_path}", save_as="map_snapshot.png", size=(900, 450))
         
         story.append(Paragraph("<b>CURRENT SPATIAL MONITORING WORKSPACE VIEW</b>", styles['Heading3']))
