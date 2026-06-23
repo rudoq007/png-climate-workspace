@@ -6,6 +6,7 @@ from streamlit_folium import st_folium
 from datetime import datetime, timedelta
 import io
 import os
+import json
 from html2image import Html2Image
 
 # Imports for automated cartographic PDF construction
@@ -75,6 +76,149 @@ png_boundary = (
 dem = ee.Image("USGS/SRTMGL1_003").clip(png_boundary)
 elevation = dem.select("elevation")
 highland_mask = elevation.gt(2200)
+
+
+# -------------------------------------------------------------
+# PROVINCIAL BOUNDARY SUPPORT
+# -------------------------------------------------------------
+# Put adm1_nso_province.geojson in either:
+#   1) ./data/adm1_nso_province.geojson
+#   2) ./adm1_nso_province.geojson
+# This file already exists in your gisnexus repository.
+PROVINCE_GEOJSON_PATHS = [
+    os.path.join("data", "adm1_nso_province.geojson"),
+    "adm1_nso_province.geojson",
+]
+
+
+@st.cache_data(show_spinner=False)
+def load_province_geojson():
+    """Load PNG provincial boundaries from local GeoJSON, if available."""
+    for path in PROVINCE_GEOJSON_PATHS:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    return None
+
+
+province_geojson = load_province_geojson()
+
+
+def _point_in_ring(lon, lat, ring):
+    """Ray-casting point-in-polygon test for one linear ring."""
+    inside = False
+    if not ring:
+        return False
+
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+
+        intersects = ((yi > lat) != (yj > lat)) and (
+            lon < (xj - xi) * (lat - yi) / ((yj - yi) + 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+
+    return inside
+
+
+def _point_in_polygon(lon, lat, polygon_coords):
+    """
+    Test a point against a GeoJSON Polygon coordinate array.
+    First ring is outer boundary; later rings are holes.
+    """
+    if not polygon_coords:
+        return False
+
+    outer = polygon_coords[0]
+    holes = polygon_coords[1:]
+
+    if not _point_in_ring(lon, lat, outer):
+        return False
+
+    for hole in holes:
+        if _point_in_ring(lon, lat, hole):
+            return False
+
+    return True
+
+
+def _point_in_feature(lon, lat, feature):
+    """Return True if lon/lat falls inside a Polygon or MultiPolygon feature."""
+    geom = feature.get("geometry") or {}
+    geom_type = geom.get("type")
+    coords = geom.get("coordinates") or []
+
+    if geom_type == "Polygon":
+        return _point_in_polygon(lon, lat, coords)
+
+    if geom_type == "MultiPolygon":
+        for polygon in coords:
+            if _point_in_polygon(lon, lat, polygon):
+                return True
+
+    return False
+
+
+def get_province_at_point(lat, lon):
+    """Return the province name and code for a clicked lon/lat point."""
+    if not province_geojson:
+        return None, None
+
+    for feature in province_geojson.get("features", []):
+        if _point_in_feature(lon, lat, feature):
+            props = feature.get("properties", {})
+            province_name = (
+                props.get("ADM1_EN")
+                or props.get("province")
+                or props.get("Province")
+                or props.get("name")
+                or props.get("NAME")
+            )
+            province_code = props.get("ADM1_PCODE") or props.get("pcode") or props.get("code")
+            return province_name, province_code
+
+    return None, None
+
+
+def add_province_boundaries(folium_map, show_tooltip=True, control=True):
+    """Add PNG provincial boundaries to a Folium map."""
+    if not province_geojson:
+        return
+
+    tooltip = None
+    if show_tooltip:
+        tooltip = folium.GeoJsonTooltip(
+            fields=["ADM1_EN", "ADM1_PCODE"],
+            aliases=["Province", "Code"],
+            sticky=True,
+            labels=True,
+            style=(
+                "background-color: white; color: #111827; font-family: sans-serif; "
+                "font-size: 12px; padding: 4px;"
+            ),
+        )
+
+    folium.GeoJson(
+        province_geojson,
+        name="Provincial Boundaries",
+        style_function=lambda feature: {
+            "color": "#111827",
+            "weight": 1.4,
+            "fillOpacity": 0,
+            "opacity": 0.95,
+        },
+        highlight_function=lambda feature: {
+            "color": "#ffff00",
+            "weight": 2.5,
+            "fillOpacity": 0.05,
+        },
+        tooltip=tooltip,
+        control=control,
+    ).add_to(folium_map)
 
 # -------------------------------------------------------------
 # 2. ANALYSIS TIMELINES
@@ -280,20 +424,23 @@ def build_print_map(hazard_mode, opacity_val=0.90, map_view=None):
             control=False,
         )
 
-    # Add PNG boundary outline.
-    try:
-        boundary_geojson = png_boundary.getInfo()
-        folium.GeoJson(
-            boundary_geojson,
-            name="PNG Boundary",
-            style_function=lambda feature: {
-                "color": "#111827",
-                "weight": 1.2,
-                "fillOpacity": 0,
-            },
-        ).add_to(print_map)
-    except Exception:
-        pass
+    # Add provincial boundaries for print output. Fall back to country boundary if local GeoJSON is missing.
+    if province_geojson:
+        add_province_boundaries(print_map, show_tooltip=False, control=False)
+    else:
+        try:
+            boundary_geojson = png_boundary.getInfo()
+            folium.GeoJson(
+                boundary_geojson,
+                name="PNG Boundary",
+                style_function=lambda feature: {
+                    "color": "#111827",
+                    "weight": 1.2,
+                    "fillOpacity": 0,
+                },
+            ).add_to(print_map)
+        except Exception:
+            pass
 
     # Respect current zoomed map view when available; otherwise use full PNG extent.
     if map_view and map_view.get("bounds"):
@@ -527,9 +674,16 @@ def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None, la
 
     # Optional selected point, kept inside the side panel so it cannot create a second page.
     if current_coordinates:
+        province_name, province_code = get_province_at_point(current_coordinates[0], current_coordinates[1])
+        province_line = (
+            f"<br/><b>Province:</b> {province_name}" + (f" ({province_code})" if province_code else "")
+            if province_name
+            else "<br/><b>Province:</b> Outside provincial boundary / not found"
+        )
         selected_point_text = (
             f"<b>Selected Point:</b><br/>"
             f"Lat {current_coordinates[0]:.4f}, Lon {current_coordinates[1]:.4f}"
+            f"{province_line}"
         )
     else:
         selected_point_text = "<b>Selected Point:</b><br/>None selected"
@@ -562,7 +716,8 @@ def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None, la
         "Temperature: NASA MODIS MOD11A1 v061<br/>"
         "Elevation: USGS SRTM GL1 30m<br/>"
         "Processing: Google Earth Engine<br/>"
-        "Boundary: USDOS LSIB SIMPLE 2017",
+        "Boundary: USDOS LSIB SIMPLE 2017<br/>"
+        "Provincial Boundaries: adm1_nso_province.geojson",
         tiny_note_style,
     )
 
@@ -639,6 +794,11 @@ def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None, la
 # 5. SIDEBAR SETTINGS & DOWNLOAD PIPELINES
 # -------------------------------------------------------------
 st.sidebar.header("Control Panel")
+if province_geojson is None:
+    st.sidebar.warning(
+        "Provincial boundary file not found. Add adm1_nso_province.geojson to ./data/ or the app root "
+        "to enable province outlines and province query results."
+    )
 hazard_type = st.sidebar.radio(
     "Select Active Data Layer",
     ["Drought (Rainfall Anomaly)", "Frost Risk Tracking"],
@@ -809,6 +969,9 @@ else:
     """
     m.get_root().html.add_child(folium.Element(legend_css))
 
+# Provincial boundary overlay. This lets users visually identify provinces and enables click-based province reporting.
+add_province_boundaries(m, show_tooltip=True, control=True)
+
 MousePosition(position="bottomright", separator=" | ", prefix="Coords: ").add_to(m)
 folium.LayerControl(position="topright", collapsed=False).add_to(m)
 
@@ -824,9 +987,16 @@ if output and output.get("last_clicked"):
 
     st.markdown("---")
     st.subheader("🔍 Selected Coordinate Inquiry Report")
-    col1, col2 = st.columns(2)
+    province_name, province_code = get_province_at_point(clicked_coords[0], clicked_coords[1])
+    col1, col2, col3 = st.columns(3)
     col1.metric("Target Latitude", f"{clicked_coords[0]:.4f}° N/S")
     col2.metric("Target Longitude", f"{clicked_coords[1]:.4f}° E/W")
+    if province_name:
+        col3.metric("Province", province_name)
+        if province_code:
+            st.caption(f"Province code: {province_code}")
+    else:
+        col3.metric("Province", "Not found")
 
     with st.spinner("Querying exact remote sensing pixel value at pinpoint..."):
         point_geom = ee.Geometry.Point([clicked_coords[1], clicked_coords[0]])
@@ -906,7 +1076,8 @@ with footer_col1:
         "* **Precipitation Metrics:** Sourced via University of California Santa Barbara (UCSB) CHIRPS Daily v2.0 Image Infrastructure.\n"
         "* **Thermal Land Surface Profiles:** Extracted via NASA MODIS (MOD11A1 v061) Daily Nighttime 1km Grids.\n"
         "* **Topographical Baseline Modeling:** Constrained via USGS Shuttle Radar Topography Mission (SRTM GL1 30m) Elevation Datasets.\n"
-        "* **Administrative Boundary:** USDOS LSIB SIMPLE 2017 country boundary for Papua New Guinea."
+        "* **Administrative Boundary:** USDOS LSIB SIMPLE 2017 country boundary for Papua New Guinea.\n"
+        "* **Provincial Boundaries:** Local `adm1_nso_province.geojson` from the GitHub dashboard repository."
     )
 
 with footer_col2:
