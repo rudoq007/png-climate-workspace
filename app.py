@@ -306,18 +306,25 @@ def capture_print_map(print_map):
 
 def generate_pdf_report(hazard_mode, current_coordinates=None):
     """
-    Generate a clean one-page landscape PDF map report.
-    The print map is separate from the live Streamlit/Folium dashboard map.
+    Generate a STRICT one-page landscape PDF map report.
+
+    Design rule:
+    - No content is added below the map frame.
+    - Methodology, selected point, limitation, credits, legend, and north arrow
+      all sit inside the right-side panel.
+    - This prevents ReportLab from pushing overflow text onto page 2.
     """
     buffer = io.BytesIO()
 
+    # Landscape Letter = 792 x 612 points.
+    # Tight but safe margins give enough room for map + side panel.
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(letter),
-        rightMargin=24,
-        leftMargin=24,
-        topMargin=22,
-        bottomMargin=20,
+        rightMargin=14,
+        leftMargin=14,
+        topMargin=14,
+        bottomMargin=14,
     )
 
     story = []
@@ -326,34 +333,42 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
     title_style = ParagraphStyle(
         "MapTitle",
         parent=styles["Heading1"],
-        fontSize=18,
-        leading=21,
+        fontSize=16,
+        leading=18,
         textColor=colors.HexColor("#0f2742"),
-        spaceAfter=2,
+        spaceAfter=1,
     )
 
     subtitle_style = ParagraphStyle(
         "MapSubtitle",
         parent=styles["Normal"],
-        fontSize=8.5,
+        fontSize=7.6,
         textColor=colors.HexColor("#475569"),
-        leading=10,
+        leading=8.5,
     )
 
-    section_style = ParagraphStyle(
-        "SectionTitle",
-        parent=styles["Heading3"],
-        fontSize=10,
-        textColor=colors.HexColor("#111827"),
-        spaceBefore=4,
-        spaceAfter=3,
-    )
-
-    note_style = ParagraphStyle(
-        "NoteText",
+    panel_heading_style = ParagraphStyle(
+        "PanelHeading",
         parent=styles["Normal"],
-        fontSize=8,
-        leading=10,
+        fontSize=8.2,
+        leading=9,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=2,
+    )
+
+    compact_note_style = ParagraphStyle(
+        "CompactNote",
+        parent=styles["Normal"],
+        fontSize=7.0,
+        leading=8.2,
+        textColor=colors.HexColor("#334155"),
+    )
+
+    tiny_note_style = ParagraphStyle(
+        "TinyNote",
+        parent=styles["Normal"],
+        fontSize=6.4,
+        leading=7.2,
         textColor=colors.HexColor("#334155"),
     )
 
@@ -361,19 +376,19 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
         map_title = "Papua New Guinea 90-Day Rainfall Anomaly Map"
         analysis_window = f"{three_months_ago.strftime('%d %b %Y')} to {safe_end_date.strftime('%d %b %Y')}"
         method_text = (
-            "The drought layer sums CHIRPS daily rainfall over a lag-safe 90-day window "
-            "and compares it with a 2000-2022 historical baseline for the same seasonal period. "
-            "Values below 100% indicate below-normal rainfall."
+            "CHIRPS daily rainfall is summed over a lag-safe 90-day window and compared with "
+            "a 2000-2022 historical baseline for the same seasonal period. Values below 100% "
+            "indicate below-normal rainfall."
         )
     else:
         map_title = "Papua New Guinea Highland Frost Risk Map"
         analysis_window = f"{one_week_ago.strftime('%d %b %Y')} to {today.strftime('%d %b %Y')}"
         method_text = (
-            "The frost layer uses the rolling 7-day minimum MODIS nighttime land surface temperature, "
-            "converted from Kelvin to Celsius, and masked to terrain above 2,200 meters using SRTM elevation."
+            "MODIS 7-day minimum nighttime land surface temperature is converted from Kelvin to Celsius "
+            "and masked to terrain above 2,200 meters using SRTM elevation."
         )
 
-    # Header
+    # Header: keep compact to preserve page height.
     story.append(Paragraph(map_title, title_style))
     story.append(
         Paragraph(
@@ -383,25 +398,46 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
             subtitle_style,
         )
     )
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 5))
 
     # Map image generated from a clean print-only map.
     try:
         print_map = build_print_map(hazard_mode, opacity_val=0.90)
         map_image_path = capture_print_map(print_map)
-        map_img = Image(map_image_path, width=500, height=305)
+        # Sized to fit a single landscape page together with the side panel.
+        map_img = Image(map_image_path, width=505, height=360)
     except Exception as e:
-        map_img = Paragraph(f"<i>Map image could not be rendered: {str(e)}</i>", note_style)
+        map_img = Paragraph(f"<i>Map image could not be rendered: {str(e)}</i>", compact_note_style)
 
-    # Right-side cartographic panel.
+    # Optional selected point, kept inside the side panel so it cannot create a second page.
+    if current_coordinates:
+        selected_point_text = (
+            f"<b>Selected Point:</b><br/>"
+            f"Lat {current_coordinates[0]:.4f}, Lon {current_coordinates[1]:.4f}"
+        )
+    else:
+        selected_point_text = "<b>Selected Point:</b><br/>None selected"
+
     north_arrow = Paragraph(
-        "<para alignment='center'><font size='24'>▲</font><br/><b>NORTH</b></para>",
+        "<para alignment='center'><font size='20'>▲</font><br/><b>NORTH</b></para>",
         styles["Normal"],
     )
 
     scale_note = Paragraph(
-        "<b>Scale:</b> dynamic web-map scale. For planning and screening use only.",
-        note_style,
+        "<b>Scale:</b> dynamic web-map scale. For screening and planning use only.",
+        tiny_note_style,
+    )
+
+    methodology_box = Paragraph(
+        f"<b>Methodology:</b><br/>{method_text}",
+        tiny_note_style,
+    )
+
+    selected_point = Paragraph(selected_point_text, tiny_note_style)
+
+    use_limitation = Paragraph(
+        "<b>Use Limitation:</b><br/>Early warning and planning support only. Validate with local field observations before operational decisions.",
+        tiny_note_style,
     )
 
     credits = Paragraph(
@@ -411,79 +447,64 @@ def generate_pdf_report(hazard_mode, current_coordinates=None):
         "Elevation: USGS SRTM GL1 30m<br/>"
         "Processing: Google Earth Engine<br/>"
         "Boundary: USDOS LSIB SIMPLE 2017",
-        note_style,
+        tiny_note_style,
     )
 
     developer = Paragraph(
-        "<b>System Developer:</b><br/>trekky675<br/>rudoq.007@gmail.com",
-        note_style,
+        "<b>System Developer:</b><br/>trekky675 | rudoq.007@gmail.com",
+        tiny_note_style,
     )
 
     right_panel = [
         [build_legend_table(hazard_mode)],
-        [Spacer(1, 8)],
+        [Spacer(1, 5)],
         [north_arrow],
-        [Spacer(1, 8)],
+        [Spacer(1, 5)],
         [scale_note],
-        [Spacer(1, 8)],
+        [Spacer(1, 5)],
+        [methodology_box],
+        [Spacer(1, 5)],
+        [selected_point],
+        [Spacer(1, 5)],
+        [use_limitation],
+        [Spacer(1, 5)],
         [credits],
-        [Spacer(1, 8)],
+        [Spacer(1, 5)],
         [developer],
     ]
 
-    right_table = Table(right_panel, colWidths=[270])
+    right_table = Table(right_panel, colWidths=[235])
     right_table.setStyle(
         TableStyle(
             [
-                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#94a3b8")),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")),
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 7),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]
         )
     )
 
-    main_layout = Table([[map_img, right_table]], colWidths=[510, 275])
+    main_layout = Table([[map_img, right_table]], colWidths=[512, 242])
     main_layout.setStyle(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("BOX", (0, 0), (0, 0), 0.8, colors.HexColor("#334155")),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
 
+    # This is the ONLY major body item after the header.
+    # No text is appended below this table, so the PDF stays as one page.
     story.append(main_layout)
-    story.append(Spacer(1, 8))
-
-    # Methodology and optional clicked point.
-    story.append(Paragraph("Methodology Brief", section_style))
-    story.append(Paragraph(method_text, note_style))
-
-    if current_coordinates:
-        story.append(Spacer(1, 4))
-        story.append(
-            Paragraph(
-                f"<b>Selected Inquiry Point:</b> "
-                f"Latitude {current_coordinates[0]:.4f}, Longitude {current_coordinates[1]:.4f}",
-                note_style,
-            )
-        )
-
-    story.append(Spacer(1, 5))
-    story.append(
-        Paragraph(
-            "<b>Use Limitation:</b> This map is intended for early warning, screening, coordination, "
-            "and planning support. It should be validated with local field observations before operational decisions.",
-            note_style,
-        )
-    )
 
     doc.build(story)
     buffer.seek(0)
