@@ -1,0 +1,6 @@
+streamlit
+earthengine-api
+folium
+streamlit-folium
+html2image
+reportlab
