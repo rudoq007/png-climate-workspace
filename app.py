@@ -19,11 +19,30 @@ st.set_page_config(layout="wide", page_title="PNG Advanced Hazard Workspace")
 st.title("🇵🇬 PNG Advanced Climate Hazard Workspace")
 st.markdown("A public-tier monitoring system featuring real-time analytical tools, vector extractions, and inquiry inspection overlays.")
 
-# Initialize Earth Engine
+# -------------------------------------------------------------
+# EARTH ENGINE INITIALIZATION WITH SECRETS FALLBACK
+# -------------------------------------------------------------
 try:
-    ee.Initialize()
+    # Check if running on Streamlit Cloud with saved credential secrets
+    if "EARTHENGINE_CREDENTIALS" in st.secrets:
+        ee_creds = st.secrets["EARTHENGINE_CREDENTIALS"]
+        
+        # Construct explicit OAuth2 credentials using the TOML token framework
+        credentials = ee.ServiceAccountCredentials(
+            email=None,
+            key_data=None,
+            token_url="https://oauth2.googleapis.com/token",
+            refresh_token=ee_creds["refresh_token"],
+            client_id=ee_creds["client_id"],
+            client_secret=ee_creds["client_secret"]
+        )
+        ee.Initialize(credentials=credentials)
+    else:
+        # Local fallback if running on your desktop machine
+        ee.Initialize()
 except Exception as e:
-    st.error("Earth Engine failed to initialize. Make sure you authenticated correctly.")
+    st.error(f"Earth Engine failed to initialize: {str(e)}")
+    st.info("If running on Streamlit Cloud, verify that the [EARTHENGINE_CREDENTIALS] block is saved correctly in your App Secrets panel.")
 
 # -------------------------------------------------------------
 # 1. CORE SPATIAL DATA SETUPS
@@ -76,7 +95,7 @@ def add_ee_layer(folium_map, ee_image_object, vis_params, name, opacity_val=1.0)
         opacity=opacity_val
     ).add_to(folium_map)
 
-# Cache calculations
+# Cache calculations to stabilize rendering
 if 'drought_img' not in st.session_state:
     st.session_state.drought_img = get_drought_layer()
 if 'frost_img' not in st.session_state:
