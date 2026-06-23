@@ -23,16 +23,18 @@ st.markdown("A public-tier monitoring system featuring real-time analytical tool
 # EARTH ENGINE INITIALIZATION WITH SECRETS FALLBACK
 # -------------------------------------------------------------
 try:
-    # Check if running on Streamlit Cloud with saved credential secrets
+    # Check if running on Streamlit Cloud with saved user-credential secrets
     if "EARTHENGINE_CREDENTIALS" in st.secrets:
         ee_creds = st.secrets["EARTHENGINE_CREDENTIALS"]
         
-        # Construct explicit OAuth2 credentials using the TOML token framework
-        credentials = ee.ServiceAccountCredentials(
-            email=None,
-            key_data=None,
-            token_url="https://oauth2.googleapis.com/token",
+        # Import the native user credentials module to handle personal authentication tokens
+        from google.oauth2.credentials import Credentials
+        
+        # Map user refresh tokens safely into the OAuth2 framework
+        credentials = Credentials(
+            token=None,
             refresh_token=ee_creds["refresh_token"],
+            token_uri="https://oauth2.googleapis.com/token",
             client_id=ee_creds["client_id"],
             client_secret=ee_creds["client_secret"]
         )
