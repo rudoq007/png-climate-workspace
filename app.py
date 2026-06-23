@@ -418,7 +418,7 @@ def capture_print_map(print_map):
 
     return png_path
 
-def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None):
+def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None, layer_opacity=0.90):
     """
     Generate a STRICT one-page landscape PDF map report.
 
@@ -508,7 +508,8 @@ def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None):
         Paragraph(
             f"<b>Generated:</b> {today.strftime('%Y-%m-%d %H:%M')} | "
             f"<b>Analysis Window:</b> {analysis_window} | "
-            f"<b>Projection:</b> WGS 84 / EPSG:4326",
+            f"<b>Projection:</b> WGS 84 / EPSG:4326 | "
+            f"<b>Layer Opacity:</b> {int(layer_opacity * 100)}%",
             subtitle_style,
         )
     )
@@ -516,7 +517,7 @@ def generate_pdf_report(hazard_mode, current_coordinates=None, map_view=None):
 
     # Map image generated from a clean print-only map.
     try:
-        print_map = build_print_map(hazard_mode, opacity_val=0.90, map_view=map_view)
+        print_map = build_print_map(hazard_mode, opacity_val=layer_opacity, map_view=map_view)
         map_image_path = capture_print_map(print_map)
         # Sized to fit a single landscape page together with the side panel.
         # Aspect ratio matches PRINT_MAP_WIDTH / PRINT_MAP_HEIGHT to avoid stretching.
@@ -885,7 +886,7 @@ if print_extent_mode == "Current zoomed map view" and not current_map_view:
 if st.sidebar.button("Generate Layout Report (PDF)"):
     with st.spinner("Compiling clean cartographic print layout..."):
         selected_view = current_map_view if print_extent_mode == "Current zoomed map view" else None
-        pdf_data = generate_pdf_report(hazard_type, clicked_coords, selected_view)
+        pdf_data = generate_pdf_report(hazard_type, clicked_coords, selected_view, layer_opacity)
         st.sidebar.download_button(
             label="💾 Download PDF Map Report",
             data=pdf_data,
