@@ -1084,8 +1084,8 @@ with footer_col2:
     st.markdown(
         "<div style='text-align: right; padding-top: 10px; font-size: 13px; "
         "font-family: sans-serif; color: #718096;'>"
-        "Developed by: <a href='mailto:rudoq.007@gmail.com' "
-        "style='color: #3182ce; font-weight: bold; text-decoration: none;'>trekky675</a>"
+        "Developed by: <a href='mailto:rua.puka@fao.org' "
+        "style='color: #3182ce; font-weight: bold; text-decoration: none;'>FAO PNG</a>"
         "</div>",
         unsafe_allow_html=True,
     )
