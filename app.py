@@ -5,18 +5,18 @@ from datetime import datetime, timedelta
 
 import ee
 import folium
+import pandas as pd
 import streamlit as st
 from folium.plugins import Fullscreen, MeasureControl, MousePosition
 from html2image import Html2Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title="PNG Live Processing Workspace", layout="wide", initial_sidebar_state="expanded")
 
-SERVICE_ACCOUNT_EMAIL = "png-el-nin-dashboard-eb9933c44@trekky675.iam.gserviceaccount.com"
 DEFAULT_PROJECT = "trekky675"
 PRINT_MAP_WIDTH = 1400
 PRINT_MAP_HEIGHT = 900
@@ -71,6 +71,15 @@ def png_geometry():
     return ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017").filter(ee.Filter.eq("country_na", "Papua New Guinea")).geometry()
 
 
+def province_collection():
+    return ee.FeatureCollection("FAO/GAUL/2015/level1").filter(ee.Filter.eq("ADM0_NAME", "Papua New Guinea"))
+
+
+@st.cache_data(show_spinner=False)
+def get_province_geojson():
+    return province_collection().getInfo()
+
+
 @st.cache_resource(show_spinner=False)
 def build_drought_layer(start_date: str, end_date: str):
     boundary = png_geometry()
@@ -104,6 +113,20 @@ def add_legend(fmap, title, rows):
     fmap.get_root().html.add_child(folium.Element("".join(legend_html)))
 
 
+def add_province_boundaries(fmap):
+    try:
+        folium.GeoJson(
+            get_province_geojson(),
+            name="Provincial boundaries",
+            style_function=lambda feature: {"color": "#111827", "weight": 1.2, "fillOpacity": 0.0, "opacity": 0.95},
+            highlight_function=lambda feature: {"color": "#facc15", "weight": 2.5, "fillOpacity": 0.04},
+            tooltip=folium.GeoJsonTooltip(fields=["ADM1_NAME"], aliases=["Province"], sticky=True, labels=True, style="background:white;color:#111827;font-size:12px;padding:4px;"),
+            control=True,
+        ).add_to(fmap)
+    except Exception:
+        pass
+
+
 def add_standard_basemaps(fmap, for_print=False):
     if for_print:
         folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True, show=True).add_to(fmap)
@@ -127,6 +150,7 @@ def build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_p
         add_ee_layer(fmap, frost_img, frost_vis, "MODIS night LST highland frost screen", opacity)
         if mode == "Frost: nighttime land surface temperature":
             add_legend(fmap, "Night LST / Frost Screen", [("#0000ff", "Below -2°C: severe frost signal"), ("#00ffff", "-2°C to 0°C: active frost line"), ("#ffffff", "0°C to 3°C: near-freezing"), ("#ffaa00", "3°C to 5°C: stable highland range"), ("#ff0000", "Above 5°C: warmer surface")])
+    add_province_boundaries(fmap)
     folium.LayerControl(collapsed=False).add_to(fmap)
     return fmap
 
@@ -164,6 +188,53 @@ def get_geotiff_url(export_image, export_name, export_format, export_scale):
     return export_image.getDownloadURL({"name": export_name, "scale": export_scale, "region": png_geometry(), "filePerBand": False, "format": export_format})
 
 
+def classify_drought(value):
+    if pd.isna(value):
+        return "No data"
+    if value < 70:
+        return "Severe deficit"
+    if value < 85:
+        return "Moderate deficit"
+    if value < 95:
+        return "Mild stress"
+    if value <= 105:
+        return "Near normal"
+    return "Wetter than normal"
+
+
+def classify_frost(value):
+    if pd.isna(value):
+        return "No highland signal"
+    if value <= -2:
+        return "Severe frost signal"
+    if value <= 0:
+        return "Active frost line"
+    if value <= 3:
+        return "Near-freezing"
+    return "Warmer / lower frost signal"
+
+
+@st.cache_data(show_spinner=False)
+def provincial_summary(drought_start, drought_end, frost_start, frost_end):
+    rain = build_drought_layer(drought_start, drought_end)
+    frost = build_frost_layer(frost_start, frost_end)
+    combined = rain.addBands(frost)
+    fc = combined.reduceRegions(collection=province_collection(), reducer=ee.Reducer.mean(), scale=5000, tileScale=4).getInfo()
+    rows = []
+    for feature in fc.get("features", []):
+        props = feature.get("properties", {})
+        rain_val = props.get("rainfall_pct_normal")
+        frost_val = props.get("night_lst_celsius")
+        rows.append({
+            "Province": props.get("ADM1_NAME", "Unknown"),
+            "Rainfall % normal": round(rain_val, 1) if rain_val is not None else None,
+            "Drought interpretation": classify_drought(rain_val),
+            "Mean night LST °C": round(frost_val, 1) if frost_val is not None else None,
+            "Frost interpretation": classify_frost(frost_val),
+        })
+    return pd.DataFrame(rows).sort_values("Province")
+
+
 def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, map_image_path=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=24, bottomMargin=24)
@@ -193,23 +264,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-utc_today = datetime.utcnow().date()
-safe_end = utc_today - timedelta(days=15)
-start_90 = safe_end - timedelta(days=90)
-start_7 = utc_today - timedelta(days=7)
-drought_period = f"{start_90} to {safe_end}"
-frost_period = f"{start_7} to {utc_today}"
-methodology_text = "Drought screening uses CHIRPS daily rainfall accumulated over a recent lag-safe window and compares it with a 2000-2022 same-month baseline. Frost screening uses MODIS Terra nighttime land surface temperature converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation. The workspace is intended for technical review, map inspection, export preparation, and field verification planning."
-
-st.markdown(f"""<div class="method-grid"><div class="method-card"><b>Drought data period</b><span class="small-note">CHIRPS rainfall window: {drought_period}</span></div><div class="method-card"><b>Frost data period</b><span class="small-note">MODIS night LST window: {frost_period}</span></div><div class="method-card"><b>Baseline</b><span class="small-note">Rainfall baseline: 2000-2022 same-month climatology.</span></div><div class="method-card"><b>Use</b><span class="small-note">Screening and prioritisation only; verify with field information.</span></div></div>""", unsafe_allow_html=True)
-
-with st.expander("Methodology and interpretation note", expanded=True):
-    st.markdown("""**Drought layer:** CHIRPS daily rainfall is accumulated over the selected recent lag-safe period and expressed as a percentage of normal rainfall for the same months. Lower percentages indicate rainfall deficit.
-
-**Frost layer:** MODIS nighttime land surface temperature is converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation. Lower values indicate areas that may require frost-related follow-up.
-
-**Important:** These are screening layers for technical review and field verification planning. They should be compared with crop condition reports, water availability, local weather observations, and provincial or district assessment information.""")
-
 ee_ready = initialise_earth_engine()
 if not ee_ready:
     st.markdown("""<div class="soft-alert"><b>Workspace setup pending:</b> The live processing layers are not available yet because the Earth Engine service account still needs final permission setup in Google Cloud / Streamlit Secrets. This message is intentionally simplified for viewers. Technical authentication details are not displayed on the public page.</div>""", unsafe_allow_html=True)
@@ -221,18 +275,37 @@ except Exception:
     st.markdown("""<div class="soft-alert"><b>Workspace setup pending:</b> Earth Engine connected, but the test query could not run. Please check the service account project permissions and private asset access.</div>""", unsafe_allow_html=True)
     st.stop()
 
-st.markdown("<div class='success-strip'><b>Earth Engine status:</b> Connected using service account.</div>", unsafe_allow_html=True)
-
 with st.sidebar:
     st.header("Control panel")
     mode = st.radio("Select active data layer", ["Drought: rainfall percentage of normal", "Frost: nighttime land surface temperature", "Both layers"])
+    time_offset_days = st.slider("Go back in time", min_value=0, max_value=90, value=0, step=5, help="Move the analysis window back up to 90 days.")
     opacity = st.slider("Data layer opacity", 0.10, 1.00, 0.85, 0.05)
     export_scale = st.selectbox("GeoTIFF export scale", [1000, 2500, 5000, 10000], index=2, help="Smaller values give higher-resolution exports but larger files.")
+
+utc_today = datetime.utcnow().date()
+selected_today = utc_today - timedelta(days=time_offset_days)
+safe_end = selected_today - timedelta(days=15)
+start_90 = safe_end - timedelta(days=90)
+start_7 = selected_today - timedelta(days=7)
+drought_period = f"{start_90} to {safe_end}"
+frost_period = f"{start_7} to {selected_today}"
+methodology_text = "Drought screening uses CHIRPS daily rainfall accumulated over a selected 90-day lag-safe window and compares it with a 2000-2022 same-month baseline. Frost screening uses MODIS Terra nighttime land surface temperature for the selected 7-day window, converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation."
+
+st.markdown(f"""<div class="method-grid"><div class="method-card"><b>Time position</b><span class="small-note">{time_offset_days} days back from today.</span></div><div class="method-card"><b>Drought data period</b><span class="small-note">CHIRPS rainfall window: {drought_period}</span></div><div class="method-card"><b>Frost data period</b><span class="small-note">MODIS night LST window: {frost_period}</span></div><div class="method-card"><b>Provincial summary</b><span class="small-note">Mean rainfall and frost indicators by province.</span></div></div>""", unsafe_allow_html=True)
+
+with st.expander("Methodology and interpretation note", expanded=True):
+    st.markdown("""**Drought layer:** CHIRPS daily rainfall is accumulated over the selected lag-safe 90-day period and expressed as a percentage of normal rainfall for the same months. Lower percentages indicate rainfall deficit.
+
+**Frost layer:** MODIS nighttime land surface temperature is converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation. Lower values indicate areas that may require frost-related follow-up.
+
+**Provincial summary:** The table below summarises the current map data by province using provincial polygons. Values are screening averages and should be verified with field observations.""")
+
+st.markdown("<div class='success-strip'><b>Earth Engine status:</b> Connected using service account.</div>", unsafe_allow_html=True)
 
 rainfall_vis = {"min": 50, "max": 150, "palette": ["#8b0000", "#ff4500", "#ffcc00", "#ffffff", "#00ccff", "#00008b"]}
 frost_vis = {"min": -5, "max": 5, "palette": ["#0000ff", "#00ffff", "#ffffff", "#ffaa00", "#ff0000"]}
 rain_img = build_drought_layer(str(start_90), str(safe_end))
-frost_img = build_frost_layer(str(start_7), str(utc_today))
+frost_img = build_frost_layer(str(start_7), str(selected_today))
 print_map_path = None
 geotiff_url = None
 
@@ -253,7 +326,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Exports")
     pdf_buffer = make_pdf_report(mode, drought_period, frost_period, methodology_text, print_map_path)
-    st.download_button("Download PDF map/report", data=pdf_buffer, file_name=f"PNG_Live_Processing_Workspace_Report_{utc_today}.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("Download PDF map/report", data=pdf_buffer, file_name=f"PNG_Live_Processing_Workspace_Report_{selected_today}.pdf", mime="application/pdf", use_container_width=True)
     if geotiff_url:
         st.link_button("Download GeoTIFF", geotiff_url, use_container_width=True)
         st.caption("GeoTIFF links are generated by Earth Engine and may expire after a short period. Refresh the app to regenerate.")
@@ -265,4 +338,12 @@ st.caption(f"Active dates: drought rainfall window {drought_period}; frost scree
 m = build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_print=False)
 st_folium(m, width=None, height=720)
 
-st.markdown("""<div class="premium-card"><b>Operational note:</b> Use this workspace to review live layer behaviour, adjust display opacity, inspect spatial patterns, export GeoTIFF data, and generate a technical map/report for discussion. Final response decisions should be supported by field verification and official assessment channels.</div>""", unsafe_allow_html=True)
+st.subheader("Provincial drought and frost summary")
+try:
+    summary_df = provincial_summary(str(start_90), str(safe_end), str(start_7), str(selected_today))
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.download_button("Download provincial summary CSV", data=summary_df.to_csv(index=False).encode("utf-8"), file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv", mime="text/csv")
+except Exception:
+    st.info("Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing.")
+
+st.markdown("""<div class="premium-card"><b>Operational note:</b> Use the time slider to review earlier drought/frost screening windows, switch data layers, inspect provincial boundaries, export GeoTIFF data, and download a provincial summary table. Final response decisions should be supported by field verification and official assessment channels.</div>""", unsafe_allow_html=True)
