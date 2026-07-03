@@ -235,6 +235,16 @@ def provincial_summary(drought_start, drought_end, frost_start, frost_end):
     return pd.DataFrame(rows).sort_values("Province")
 
 
+def make_table_summary(df):
+    if df.empty:
+        return "No provincial summary values were returned for the selected period."
+    severe_or_moderate = int(df["Drought interpretation"].isin(["Severe deficit", "Moderate deficit"]).sum())
+    frost_watch = int(df["Frost interpretation"].isin(["Severe frost signal", "Active frost line", "Near-freezing"]).sum())
+    driest = df.dropna(subset=["Rainfall % normal"]).sort_values("Rainfall % normal").head(3)["Province"].tolist()
+    coldest = df.dropna(subset=["Mean night LST °C"]).sort_values("Mean night LST °C").head(3)["Province"].tolist()
+    return f"For the selected period, {severe_or_moderate} provinces fall in moderate or severe rainfall deficit classes, while {frost_watch} provinces show a highland cold-temperature signal. Lowest rainfall percentage of normal: {', '.join(driest) if driest else 'no data'}. Coldest highland nighttime LST signal: {', '.join(coldest) if coldest else 'no data'}."
+
+
 def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, map_image_path=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=24, bottomMargin=24)
@@ -275,15 +285,22 @@ except Exception:
     st.markdown("""<div class="soft-alert"><b>Workspace setup pending:</b> Earth Engine connected, but the test query could not run. Please check the service account project permissions and private asset access.</div>""", unsafe_allow_html=True)
     st.stop()
 
+utc_today = datetime.utcnow().date()
+date_options = [utc_today - timedelta(days=d) for d in range(90, -1, -5)]
+
 with st.sidebar:
     st.header("Control panel")
     mode = st.radio("Select active data layer", ["Drought: rainfall percentage of normal", "Frost: nighttime land surface temperature", "Both layers"])
-    time_offset_days = st.slider("Go back in time", min_value=0, max_value=90, value=0, step=5, help="Move the analysis window back up to 90 days.")
+    selected_today = st.select_slider(
+        "Analysis date",
+        options=date_options,
+        value=utc_today,
+        format_func=lambda d: f"{d.strftime('%d %b %Y')} (latest)" if d == utc_today else f"{d.strftime('%d %b %Y')} ({(utc_today - d).days} days back)",
+        help="Select the anchor date for the analysis. The drought window uses the 90 days ending 15 days before this date; the frost window uses the 7 days ending on this date.",
+    )
     opacity = st.slider("Data layer opacity", 0.10, 1.00, 0.85, 0.05)
     export_scale = st.selectbox("GeoTIFF export scale", [1000, 2500, 5000, 10000], index=2, help="Smaller values give higher-resolution exports but larger files.")
 
-utc_today = datetime.utcnow().date()
-selected_today = utc_today - timedelta(days=time_offset_days)
 safe_end = selected_today - timedelta(days=15)
 start_90 = safe_end - timedelta(days=90)
 start_7 = selected_today - timedelta(days=7)
@@ -291,14 +308,16 @@ drought_period = f"{start_90} to {safe_end}"
 frost_period = f"{start_7} to {selected_today}"
 methodology_text = "Drought screening uses CHIRPS daily rainfall accumulated over a selected 90-day lag-safe window and compares it with a 2000-2022 same-month baseline. Frost screening uses MODIS Terra nighttime land surface temperature for the selected 7-day window, converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation."
 
-st.markdown(f"""<div class="method-grid"><div class="method-card"><b>Time position</b><span class="small-note">{time_offset_days} days back from today.</span></div><div class="method-card"><b>Drought data period</b><span class="small-note">CHIRPS rainfall window: {drought_period}</span></div><div class="method-card"><b>Frost data period</b><span class="small-note">MODIS night LST window: {frost_period}</span></div><div class="method-card"><b>Provincial summary</b><span class="small-note">Mean rainfall and frost indicators by province.</span></div></div>""", unsafe_allow_html=True)
+st.markdown(f"""<div class="method-grid"><div class="method-card"><b>Selected analysis date</b><span class="small-note">{selected_today.strftime('%d %b %Y')} ({(utc_today - selected_today).days} days back).</span></div><div class="method-card"><b>Drought data period</b><span class="small-note">CHIRPS rainfall window: {drought_period}</span></div><div class="method-card"><b>Frost data period</b><span class="small-note">MODIS night LST window: {frost_period}</span></div><div class="method-card"><b>Provincial summary</b><span class="small-note">Mean rainfall and frost indicators by province for this selected date.</span></div></div>""", unsafe_allow_html=True)
 
 with st.expander("Methodology and interpretation note", expanded=True):
-    st.markdown("""**Drought layer:** CHIRPS daily rainfall is accumulated over the selected lag-safe 90-day period and expressed as a percentage of normal rainfall for the same months. Lower percentages indicate rainfall deficit.
+    st.markdown("""**Date selector:** Choose an analysis date from the last three months. The workspace then rebuilds the drought and frost windows around that selected date.
+
+**Drought layer:** CHIRPS daily rainfall is accumulated over the selected lag-safe 90-day period and expressed as a percentage of normal rainfall for the same months. Lower percentages indicate rainfall deficit.
 
 **Frost layer:** MODIS nighttime land surface temperature is converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation. Lower values indicate areas that may require frost-related follow-up.
 
-**Provincial summary:** The table below summarises the current map data by province using provincial polygons. Values are screening averages and should be verified with field observations.""")
+**Provincial summary:** The table summarises the currently selected map data by province using provincial polygons. Values are screening averages and should be verified with field observations.""")
 
 st.markdown("<div class='success-strip'><b>Earth Engine status:</b> Connected using service account.</div>", unsafe_allow_html=True)
 
@@ -339,11 +358,13 @@ m = build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_p
 st_folium(m, width=None, height=720)
 
 st.subheader("Provincial drought and frost summary")
+st.markdown(f"""<div class="premium-card"><b>About this table:</b> The table summarises the selected map date, using provincial polygons to calculate average rainfall percentage of normal and mean highland nighttime land surface temperature. It is intended for screening and prioritisation, not as a confirmed impact assessment. Selected analysis date: <b>{selected_today.strftime('%d %b %Y')}</b>.</div>""", unsafe_allow_html=True)
 try:
     summary_df = provincial_summary(str(start_90), str(safe_end), str(start_7), str(selected_today))
+    st.info(make_table_summary(summary_df))
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
     st.download_button("Download provincial summary CSV", data=summary_df.to_csv(index=False).encode("utf-8"), file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv", mime="text/csv")
 except Exception:
     st.info("Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing.")
 
-st.markdown("""<div class="premium-card"><b>Operational note:</b> Use the time slider to review earlier drought/frost screening windows, switch data layers, inspect provincial boundaries, export GeoTIFF data, and download a provincial summary table. Final response decisions should be supported by field verification and official assessment channels.</div>""", unsafe_allow_html=True)
+st.markdown("""<div class="premium-card"><b>Operational note:</b> Use the date selector to review earlier drought/frost screening windows, switch data layers, inspect provincial boundaries, export GeoTIFF data, and download a provincial summary table. Final response decisions should be supported by field verification and official assessment channels.</div>""", unsafe_allow_html=True)
