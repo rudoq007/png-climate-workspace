@@ -39,8 +39,9 @@ st.markdown(
       .small-note {font-size:13px; color:#667085!important; line-height:1.45;}
       .soft-alert {background:#fff7ed; border-left:5px solid #d97706; border-radius:16px; padding:13px 15px; margin:12px 0;}
       .success-strip {background:#ecfdf5; border-left:5px solid #15803d; border-radius:16px; padding:13px 15px; margin:12px 0;}
-      .legend-box {background:rgba(255,255,255,.96)!important; color:#111827!important; border:1px solid #d1d5db!important; border-radius:12px!important; padding:10px 12px!important; font-size:12px!important; line-height:1.45!important; box-shadow:0 8px 24px rgba(16,24,40,.18)!important;}
-      .legend-box * {color:#111827!important;}
+      .legend-box {background:rgba(255,255,255,.98)!important; color:#374151!important; border:1px solid #cbd5e1!important; border-radius:12px!important; padding:10px 12px!important; font-size:12px!important; line-height:1.45!important; box-shadow:0 10px 30px rgba(0,0,0,.26)!important; backdrop-filter: blur(3px)!important;}
+      .legend-box, .legend-box * {color:#374151!important; text-shadow:0 1px 0 rgba(255,255,255,.90)!important;}
+      .legend-box b {color:#1f2937!important;}
       iframe {border-radius:18px!important;}
       @media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
     </style>
@@ -106,9 +107,9 @@ def add_ee_layer(fmap, image, vis_params, name, opacity=0.85):
 
 
 def add_legend(fmap, title, rows):
-    legend_html = ["<div class='legend-box' style='position: fixed; bottom: 28px; left: 28px; z-index: 9999;'>", f"<b>{title}</b><br>"]
+    legend_html = ["<div class='legend-box' style='position: fixed; bottom: 28px; left: 28px; z-index: 9999; background: rgba(255,255,255,0.98); color: #374151;'>", f"<b style='color:#1f2937;'>{title}</b><br>"]
     for colour, label in rows:
-        legend_html.append(f"<span style='display:inline-block;width:14px;height:14px;background:{colour};border:1px solid #374151;margin-right:6px;vertical-align:middle;'></span>{label}<br>")
+        legend_html.append(f"<span style='display:inline-block;width:14px;height:14px;background:{colour};border:1px solid #374151;margin-right:6px;vertical-align:middle;'></span><span style='color:#374151;'>{label}</span><br>")
     legend_html.append("</div>")
     fmap.get_root().html.add_child(folium.Element("".join(legend_html)))
 
