@@ -78,14 +78,7 @@ def build_drought_layer(start_date: str, end_date: str):
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
     days = max((end - start).days, 1)
     current_rain = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start_date, end_date).sum().clip(boundary)
-    baseline_rain = (
-        ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
-        .filter(ee.Filter.calendarRange(start.month, end.month, "month"))
-        .filterDate("2000-01-01", "2022-12-31")
-        .mean()
-        .multiply(days)
-        .clip(boundary)
-    )
+    baseline_rain = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filter(ee.Filter.calendarRange(start.month, end.month, "month")).filterDate("2000-01-01", "2022-12-31").mean().multiply(days).clip(boundary)
     return current_rain.divide(baseline_rain).multiply(100).rename("rainfall_pct_normal")
 
 
@@ -100,54 +93,40 @@ def build_frost_layer(start_date: str, end_date: str):
 
 def add_ee_layer(fmap, image, vis_params, name, opacity=0.85):
     map_id = ee.Image(image).getMapId(vis_params)
-    folium.raster_layers.TileLayer(
-        tiles=map_id["tile_fetcher"].url_format,
-        attr="Google Earth Engine",
-        name=name,
-        overlay=True,
-        control=True,
-        opacity=opacity,
-    ).add_to(fmap)
+    folium.raster_layers.TileLayer(tiles=map_id["tile_fetcher"].url_format, attr="Google Earth Engine", name=name, overlay=True, control=True, opacity=opacity).add_to(fmap)
 
 
 def add_legend(fmap, title, rows):
     legend_html = ["<div class='legend-box' style='position: fixed; bottom: 28px; left: 28px; z-index: 9999;'>", f"<b>{title}</b><br>"]
     for colour, label in rows:
-        legend_html.append(
-            f"<span style='display:inline-block;width:14px;height:14px;background:{colour};border:1px solid #374151;margin-right:6px;vertical-align:middle;'></span>{label}<br>"
-        )
+        legend_html.append(f"<span style='display:inline-block;width:14px;height:14px;background:{colour};border:1px solid #374151;margin-right:6px;vertical-align:middle;'></span>{label}<br>")
     legend_html.append("</div>")
     fmap.get_root().html.add_child(folium.Element("".join(legend_html)))
 
 
+def add_standard_basemaps(fmap, for_print=False):
+    if for_print:
+        folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True, show=True).add_to(fmap)
+        return
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True, show=False).add_to(fmap)
+    folium.TileLayer("CartoDB positron", name="CartoDB Light", overlay=False, control=True, show=True).add_to(fmap)
+    folium.TileLayer("CartoDB dark_matter", name="CartoDB Dark", overlay=False, control=True, show=False).add_to(fmap)
+
+
 def build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_print=False):
-    fmap = folium.Map(
-        location=[-6.3, 146.5],
-        zoom_start=6,
-        tiles="CartoDB positron" if not for_print else "OpenStreetMap",
-        control_scale=True,
-        width=f"{PRINT_MAP_WIDTH}px" if for_print else "100%",
-        height=f"{PRINT_MAP_HEIGHT}px" if for_print else "100%",
-    )
+    fmap = folium.Map(location=[-6.3, 146.5], zoom_start=6, tiles=None, control_scale=True, width=f"{PRINT_MAP_WIDTH}px" if for_print else "100%", height=f"{PRINT_MAP_HEIGHT}px" if for_print else "100%")
+    add_standard_basemaps(fmap, for_print=for_print)
     if not for_print:
         Fullscreen().add_to(fmap)
         MeasureControl(primary_length_unit="kilometers").add_to(fmap)
         MousePosition(position="bottomright", separator=" | ", prefix="Lat/Lon:").add_to(fmap)
     if mode in ["Drought: rainfall percentage of normal", "Both layers"]:
         add_ee_layer(fmap, rain_img, rainfall_vis, "CHIRPS rainfall % of normal", opacity)
-        add_legend(
-            fmap,
-            "Rainfall % of Normal",
-            [("#8b0000", "Below 70%: severe deficit"), ("#ff4500", "70-85%: moderate deficit"), ("#ffcc00", "85-95%: mild stress"), ("#ffffff", "95-105%: near normal"), ("#00ccff", "105-130%: wetter"), ("#00008b", "Above 130%: very wet")],
-        )
+        add_legend(fmap, "Rainfall % of Normal", [("#8b0000", "Below 70%: severe deficit"), ("#ff4500", "70-85%: moderate deficit"), ("#ffcc00", "85-95%: mild stress"), ("#ffffff", "95-105%: near normal"), ("#00ccff", "105-130%: wetter"), ("#00008b", "Above 130%: very wet")])
     if mode in ["Frost: nighttime land surface temperature", "Both layers"]:
         add_ee_layer(fmap, frost_img, frost_vis, "MODIS night LST highland frost screen", opacity)
         if mode == "Frost: nighttime land surface temperature":
-            add_legend(
-                fmap,
-                "Night LST / Frost Screen",
-                [("#0000ff", "Below -2°C: severe frost signal"), ("#00ffff", "-2°C to 0°C: active frost line"), ("#ffffff", "0°C to 3°C: near-freezing"), ("#ffaa00", "3°C to 5°C: stable highland range"), ("#ff0000", "Above 5°C: warmer surface")],
-            )
+            add_legend(fmap, "Night LST / Frost Screen", [("#0000ff", "Below -2°C: severe frost signal"), ("#00ffff", "-2°C to 0°C: active frost line"), ("#ffffff", "0°C to 3°C: near-freezing"), ("#ffaa00", "3°C to 5°C: stable highland range"), ("#ff0000", "Above 5°C: warmer surface")])
     folium.LayerControl(collapsed=False).add_to(fmap)
     return fmap
 
@@ -159,12 +138,7 @@ def capture_map_png(fmap):
     fmap.save(html_path)
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
-    force_size_css = f"""
-    <style>
-      html, body {{margin:0!important;padding:0!important;width:{PRINT_MAP_WIDTH}px!important;height:{PRINT_MAP_HEIGHT}px!important;overflow:hidden!important;background:white!important;}}
-      .folium-map, .leaflet-container {{width:{PRINT_MAP_WIDTH}px!important;height:{PRINT_MAP_HEIGHT}px!important;min-height:{PRINT_MAP_HEIGHT}px!important;}}
-    </style>
-    """
+    force_size_css = f"""<style>html, body {{margin:0!important;padding:0!important;width:{PRINT_MAP_WIDTH}px!important;height:{PRINT_MAP_HEIGHT}px!important;overflow:hidden!important;background:white!important;}} .folium-map, .leaflet-container {{width:{PRINT_MAP_WIDTH}px!important;height:{PRINT_MAP_HEIGHT}px!important;min-height:{PRINT_MAP_HEIGHT}px!important;}}</style>"""
     html = html.replace("</head>", force_size_css + "\n</head>") if "</head>" in html else force_size_css + html
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -198,13 +172,7 @@ def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, 
     body_style = ParagraphStyle("BodyCustom", parent=styles["BodyText"], fontSize=8.8, leading=11)
     small_style = ParagraphStyle("Small", parent=styles["BodyText"], fontSize=7.6, leading=10, textColor=colors.HexColor("#667085"))
     story = [Paragraph("PNG Live Processing Workspace: Map and Methodology Report", title_style), Paragraph(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", small_style), Spacer(1, 6)]
-    story.append(
-        Table(
-            [["Selected layer", layer_name], ["Drought data period", drought_period], ["Frost screening period", frost_period], ["Purpose", "Technical review, map inspection, export preparation, and field verification planning."]],
-            colWidths=[145, 575],
-            style=[("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#ecfdf5")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0f3d2e")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")), ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)],
-        )
-    )
+    story.append(Table([["Selected layer", layer_name], ["Drought data period", drought_period], ["Frost screening period", frost_period], ["Purpose", "Technical review, map inspection, export preparation, and field verification planning."]], colWidths=[145, 575], style=[("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#ecfdf5")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0f3d2e")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")), ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Map output", styles["Heading2"]))
     if map_image_path and os.path.exists(map_image_path):
@@ -217,16 +185,13 @@ def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, 
     return buffer
 
 
-st.markdown(
-    """
-    <div class="hero">
-      <div class="eyebrow">FAO PNG climate-risk technical workspace</div>
-      <h1>PNG Live Processing Workspace</h1>
-      <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The public dashboard remains the briefing layer; EarthMap remains the broader FAO geospatial exploration platform.</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<div class="hero">
+  <div class="eyebrow">FAO PNG climate-risk technical workspace</div>
+  <h1>PNG Live Processing Workspace</h1>
+  <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The public dashboard remains the briefing layer; EarthMap remains the broader FAO geospatial exploration platform.</div>
+</div>
+""", unsafe_allow_html=True)
 
 utc_today = datetime.utcnow().date()
 safe_end = utc_today - timedelta(days=15)
