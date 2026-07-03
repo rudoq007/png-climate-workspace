@@ -32,8 +32,6 @@ st.markdown(
       .hero h1 {font-size:42px; line-height:1.05; letter-spacing:-.045em; margin:8px 0;}
       .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#d9f99d!important;}
       .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#ecfdf5!important;}
-      .badge-row {display:flex; flex-wrap:wrap; gap:10px; margin-top:16px;}
-      .badge {border:1px solid rgba(255,255,255,.24); background:rgba(255,255,255,.13); border-radius:999px; padding:8px 12px; font-weight:800; font-size:12px;}
       .premium-card {background:rgba(255,255,255,.94); border:1px solid rgba(15,61,46,.10); border-radius:22px; padding:18px 20px; box-shadow:0 10px 28px rgba(16,24,40,.08);}
       .method-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin:14px 0 18px;}
       .method-card {background:#fff; border:1px solid #d8e0df; border-radius:18px; padding:14px; box-shadow:0 6px 18px rgba(16,24,40,.06);}
@@ -225,7 +223,6 @@ st.markdown(
       <div class="eyebrow">FAO PNG climate-risk technical workspace</div>
       <h1>PNG Live Processing Workspace</h1>
       <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The public dashboard remains the briefing layer; EarthMap remains the broader FAO geospatial exploration platform.</div>
-      <div class="badge-row"><span class="badge">GEE processing</span><span class="badge">Drought + frost screen</span><span class="badge">Methodology visible</span><span class="badge">PDF report with map</span><span class="badge">GeoTIFF export</span><span class="badge">Dark-mode safe legend</span></div>
     </div>
     """,
     unsafe_allow_html=True,
