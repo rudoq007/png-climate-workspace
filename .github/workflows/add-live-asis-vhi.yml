@@ -1,0 +1,185 @@
+name: Add live FAO ASIS VHI-D layer
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/add-live-asis-vhi.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Streamlit app with FAO ASIS VHI-D support
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          if 'ASIS_COLLECTION_ID = "projects/UNFAO/ASIS/VHI-D"' not in s:
+              s = s.replace(
+                  'PRINT_MAP_HEIGHT = 900\n',
+                  'PRINT_MAP_HEIGHT = 900\nASIS_COLLECTION_ID = "projects/UNFAO/ASIS/VHI-D"\n'
+              )
+
+          if 'def mask_asis_flag_values' not in s:
+              marker = '\n\ndef add_ee_layer(fmap, image, vis_params, name, opacity=0.85):\n'
+              insert = r'''
+
+def mask_asis_flag_values(image):
+    """Mask FAO ASIS flag values from VHI-D.
+
+    ASIS VHI-D uses 251=off season, 252=no data,
+    253=no seasonality/no season2, and 254=no cropland/no grassland.
+    """
+    mask = image.neq(251).And(image.neq(252)).And(image.neq(253)).And(image.neq(254))
+    return image.updateMask(mask)
+
+
+@st.cache_resource(show_spinner=False)
+def build_asis_vhi_layer(anchor_date: str):
+    """Return latest FAO ASIS VHI-D dekad available before/near selected date."""
+    boundary = png_geometry()
+    end = ee.Date(anchor_date).advance(1, "day")
+    start = end.advance(-140, "day")
+    collection = (
+        ee.ImageCollection(ASIS_COLLECTION_ID)
+        .filterDate(start, end)
+        .sort("system:time_start", False)
+    )
+    image = ee.Image(collection.first())
+    return mask_asis_flag_values(image).rename("asis_vhi_d").clip(boundary)
+
+
+@st.cache_data(show_spinner=False)
+def asis_metadata(anchor_date: str):
+    end = ee.Date(anchor_date).advance(1, "day")
+    start = end.advance(-140, "day")
+    image = ee.Image(
+        ee.ImageCollection(ASIS_COLLECTION_ID)
+        .filterDate(start, end)
+        .sort("system:time_start", False)
+        .first()
+    )
+    info = image.toDictionary([
+        "DEKAD_year",
+        "DEKAD_month",
+        "DEKAD_dekadAlt",
+        "system:time_start",
+        "system:time_end",
+    ]).getInfo()
+    return info
+
+
+@st.cache_data(show_spinner=False)
+def provincial_asis_summary(anchor_date: str):
+    image = build_asis_vhi_layer(anchor_date)
+    nominal_scale = image.projection().nominalScale()
+    fc = image.reduceRegions(
+        collection=province_collection(),
+        reducer=ee.Reducer.mean(),
+        scale=nominal_scale,
+        tileScale=4,
+    ).getInfo()
+    rows = []
+    for feature in fc.get("features", []):
+        props = feature.get("properties", {})
+        mean_val = props.get("mean")
+        if mean_val is None:
+            status = "No ASIS VHI-D data"
+        elif mean_val < 0.35:
+            status = "High vegetation stress"
+        elif mean_val < 0.50:
+            status = "Moderate vegetation stress"
+        elif mean_val < 0.65:
+            status = "Watch / below-normal vegetation condition"
+        else:
+            status = "Lower current vegetation stress"
+        rows.append({
+            "Province": props.get("ADM1_NAME", "Unknown"),
+            "Mean FAO ASIS VHI-D": round(mean_val, 3) if mean_val is not None else None,
+            "ASIS vegetation stress interpretation": status,
+        })
+    return pd.DataFrame(rows).sort_values("Mean FAO ASIS VHI-D", na_position="last")
+'''
+              s = s.replace(marker, insert + marker)
+
+          s = s.replace(
+              '["Drought: rainfall percentage of normal", "Frost: nighttime land surface temperature", "Both layers"]',
+              '["FAO ASIS VHI-D vegetation health", "Drought: rainfall percentage of normal", "Frost: nighttime land surface temperature", "Both layers"]'
+          )
+
+          s = s.replace(
+              'def build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_print=False):',
+              'def build_map(mode, rain_img, frost_img, asis_img, rainfall_vis, frost_vis, asis_vis, opacity, for_print=False):'
+          )
+          s = s.replace(
+              'if mode in ["Drought: rainfall percentage of normal", "Both layers"]:\n        add_ee_layer(fmap, rain_img, rainfall_vis, "CHIRPS rainfall % of normal", opacity)',
+              'if mode in ["FAO ASIS VHI-D vegetation health", "Both layers"]:\n        add_ee_layer(fmap, asis_img, asis_vis, "FAO ASIS VHI-D vegetation health", opacity)\n        add_legend(fmap, "FAO ASIS VHI-D", [("#662A00", "0.00-0.35: high vegetation stress"), ("#D8D8D8", "0.35-0.50: moderate stress"), ("#E5FFCC", "0.50-0.65: watch"), ("#006633", "Above 0.65: healthier vegetation")])\n    if mode in ["Drought: rainfall percentage of normal", "Both layers"]:\n        add_ee_layer(fmap, rain_img, rainfall_vis, "CHIRPS rainfall % of normal", opacity)'
+          )
+
+          s = s.replace(
+              'def make_export_image(mode, rain_img, frost_img):\n    if mode == "Drought: rainfall percentage of normal":',
+              'def make_export_image(mode, rain_img, frost_img, asis_img):\n    if mode == "FAO ASIS VHI-D vegetation health":\n        return asis_img.rename("asis_vhi_d"), "PNG_FAO_ASIS_VHI_D_latest", "GEO_TIFF"\n    if mode == "Drought: rainfall percentage of normal":'
+          )
+          s = s.replace(
+              'combined = rain_img.rename("rainfall_pct_normal").addBands(frost_img.rename("night_lst_celsius"))',
+              'combined = asis_img.rename("asis_vhi_d").addBands(rain_img.rename("rainfall_pct_normal")).addBands(frost_img.rename("night_lst_celsius"))'
+          )
+
+          s = s.replace(
+              'methodology_text = "Drought screening uses CHIRPS daily rainfall accumulated over a selected 90-day lag-safe window and compares it with a 2000-2022 same-month baseline. Frost screening uses MODIS Terra nighttime land surface temperature for the selected 7-day window, converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation."',
+              'methodology_text = "FAO ASIS VHI-D is read directly from the projects/UNFAO/ASIS/VHI-D Earth Engine collection, using the latest available dekad near the selected date and masking ASIS flag values 251-254. Drought screening uses CHIRPS daily rainfall accumulated over a selected 90-day lag-safe window and compares it with a 2000-2022 same-month baseline. Frost screening uses MODIS Terra nighttime land surface temperature for the selected 7-day window, converted to Celsius and masked to highland areas above 2,200 m using SRTM elevation."'
+          )
+
+          s = s.replace(
+              'rainfall_vis = {"min": 50, "max": 150, "palette": ["#8b0000", "#ff4500", "#ffcc00", "#ffffff", "#00ccff", "#00008b"]}\nfrost_vis = {"min": -5, "max": 5, "palette": ["#0000ff", "#00ffff", "#ffffff", "#ffaa00", "#ff0000"]}\nrain_img = build_drought_layer(str(start_90), str(safe_end))\nfrost_img = build_frost_layer(str(start_7), str(selected_today))',
+              'rainfall_vis = {"min": 50, "max": 150, "palette": ["#8b0000", "#ff4500", "#ffcc00", "#ffffff", "#00ccff", "#00008b"]}\nfrost_vis = {"min": -5, "max": 5, "palette": ["#0000ff", "#00ffff", "#ffffff", "#ffaa00", "#ff0000"]}\nasis_vis = {"min": 0, "max": 1, "palette": ["#662A00", "#D8D8D8", "#E5FFCC", "#006633"]}\nrain_img = build_drought_layer(str(start_90), str(safe_end))\nfrost_img = build_frost_layer(str(start_7), str(selected_today))\nasis_img = build_asis_vhi_layer(str(selected_today))'
+          )
+
+          s = s.replace(
+              'print_map = build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_print=True)',
+              'print_map = build_map(mode, rain_img, frost_img, asis_img, rainfall_vis, frost_vis, asis_vis, opacity, for_print=True)'
+          )
+          s = s.replace(
+              'export_img, export_name, export_format = make_export_image(mode, rain_img, frost_img)',
+              'export_img, export_name, export_format = make_export_image(mode, rain_img, frost_img, asis_img)'
+          )
+          s = s.replace(
+              'm = build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_print=False)',
+              'm = build_map(mode, rain_img, frost_img, asis_img, rainfall_vis, frost_vis, asis_vis, opacity, for_print=False)'
+          )
+
+          if 'FAO ASIS VHI-D live vegetation health summary' not in s:
+              insert_point = 'st.subheader("Provincial drought and frost summary")\n'
+              asis_section = r'''
+st.subheader("FAO ASIS VHI-D live vegetation health summary")
+st.markdown("""<div class="premium-card"><b>Live ASIS source:</b> This section reads the FAO ASIS VHI-D dekadal ImageCollection directly from Google Earth Engine: <code>projects/UNFAO/ASIS/VHI-D</code>. ASIS flag values 251-254 are masked before map display and provincial statistics.</div>""", unsafe_allow_html=True)
+try:
+    meta = asis_metadata(str(selected_today))
+    dekad_label = f"{meta.get('DEKAD_year', 'latest')}-{meta.get('DEKAD_month', '')}-D{meta.get('DEKAD_dekadAlt', '')}"
+    st.info(f"Latest available FAO ASIS VHI-D dekad used for this selected date: **{dekad_label}**")
+    asis_df = provincial_asis_summary(str(selected_today))
+    st.dataframe(asis_df, use_container_width=True, hide_index=True)
+    st.download_button("Download FAO ASIS VHI-D provincial CSV", data=asis_df.to_csv(index=False).encode("utf-8"), file_name=f"PNG_FAO_ASIS_VHI_D_summary_{selected_today}.csv", mime="text/csv")
+except Exception:
+    st.info("FAO ASIS VHI-D live summary is not available yet. Check that the deployed Earth Engine service account has read access to projects/UNFAO/ASIS/VHI-D.")
+
+'''
+              s = s.replace(insert_point, asis_section + insert_point)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git diff --cached --quiet || git commit -m "Add live FAO ASIS VHI-D layer"
+          git push
