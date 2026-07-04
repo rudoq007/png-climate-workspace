@@ -24,25 +24,38 @@ PRINT_MAP_HEIGHT = 900
 st.markdown(
     """
     <style>
-      .stApp {background: radial-gradient(circle at top left,#eef8f3 0,#f5f8f7 38%,#f8fafc 100%); color:#111827;}
-      div[data-testid="stMarkdownContainer"], div[data-testid="stText"], label, p, span {color:#111827!important;}
-      .hero {background:linear-gradient(135deg,#0f3d2e 0%,#17694f 62%,#d97706 180%); color:#fff!important; border-radius:28px; padding:30px 34px; margin-bottom:18px; box-shadow:0 22px 55px rgba(16,24,40,.20); position:relative; overflow:hidden;}
+      :root {
+        --earthmap-blue:#6699c7;
+        --earthmap-blue-dark:#4f82b3;
+        --earthmap-blue-soft:#e7f1fb;
+        --earthmap-navy:#102a43;
+        --png-red:#d71920;
+        --png-gold:#fcd116;
+        --card-border:#c7d9ea;
+      }
+      .stApp {background: linear-gradient(180deg,#f3f8fd 0%,#edf5fb 42%,#f8fbfd 100%); color:#102a43;}
+      div[data-testid="stMarkdownContainer"], div[data-testid="stText"], label, p, span {color:#102a43!important;}
+      section[data-testid="stSidebar"] {background: linear-gradient(180deg,#e6f1fb 0%,#f8fbfd 100%)!important; border-right:1px solid #c7d9ea;}
+      .hero {background:linear-gradient(135deg,#6699c7 0%,#5d94c4 48%,#4f82b3 100%); color:#fff!important; border-radius:18px; padding:28px 32px; margin-bottom:18px; box-shadow:0 18px 44px rgba(79,130,179,.28); position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.28);}
       .hero * {color:#fff!important;}
-      .hero:after {content:""; position:absolute; width:360px; height:360px; border-radius:999px; right:-130px; top:-150px; background:rgba(255,255,255,.10);}
+      .hero:before {content:""; position:absolute; left:0; right:0; bottom:0; height:5px; background:linear-gradient(90deg,#000000 0%,#d71920 42%,#fcd116 70%,#ffffff 100%); opacity:.95;}
+      .hero:after {content:""; position:absolute; width:360px; height:360px; border-radius:999px; right:-130px; top:-150px; background:rgba(255,255,255,.16);}
       .hero h1 {font-size:42px; line-height:1.05; letter-spacing:-.045em; margin:8px 0;}
-      .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#d9f99d!important;}
-      .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#ecfdf5!important;}
-      .premium-card {background:rgba(255,255,255,.94); border:1px solid rgba(15,61,46,.10); border-radius:22px; padding:18px 20px; box-shadow:0 10px 28px rgba(16,24,40,.08);}
+      .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#eef7ff!important;}
+      .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#f8fbfd!important;}
+      .premium-card {background:rgba(255,255,255,.96); border:1px solid var(--card-border); border-radius:18px; padding:18px 20px; box-shadow:0 10px 28px rgba(79,130,179,.13);}
       .method-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin:14px 0 18px;}
-      .method-card {background:#fff; border:1px solid #d8e0df; border-radius:18px; padding:14px; box-shadow:0 6px 18px rgba(16,24,40,.06);}
-      .method-card b {display:block; margin-bottom:6px; color:#0f3d2e!important;}
-      .small-note {font-size:13px; color:#667085!important; line-height:1.45;}
-      .soft-alert {background:#fff7ed; border-left:5px solid #d97706; border-radius:16px; padding:13px 15px; margin:12px 0;}
-      .success-strip {background:#ecfdf5; border-left:5px solid #15803d; border-radius:16px; padding:13px 15px; margin:12px 0;}
+      .method-card {background:#ffffff; border:1px solid var(--card-border); border-radius:16px; padding:14px; box-shadow:0 6px 18px rgba(79,130,179,.10);}
+      .method-card b {display:block; margin-bottom:6px; color:#4f82b3!important;}
+      .small-note {font-size:13px; color:#516173!important; line-height:1.45;}
+      .soft-alert {background:#fff8e1; border-left:5px solid #fcd116; border-radius:14px; padding:13px 15px; margin:12px 0;}
+      .success-strip {background:#e7f1fb; border-left:5px solid #6699c7; border-radius:14px; padding:13px 15px; margin:12px 0;}
       .legend-box {background:rgba(255,255,255,.98)!important; color:#374151!important; border:1px solid #cbd5e1!important; border-radius:12px!important; padding:10px 12px!important; font-size:12px!important; line-height:1.45!important; box-shadow:0 10px 30px rgba(0,0,0,.26)!important; backdrop-filter: blur(3px)!important;}
       .legend-box, .legend-box * {color:#374151!important; text-shadow:0 1px 0 rgba(255,255,255,.90)!important;}
       .legend-box b {color:#1f2937!important;}
-      iframe {border-radius:18px!important;}
+      iframe {border-radius:16px!important; border:1px solid #c7d9ea!important;}
+      .stButton button, .stDownloadButton button {border-radius:12px!important; border:1px solid #4f82b3!important; background:#6699c7!important; color:#ffffff!important; font-weight:700!important;}
+      .stButton button:hover, .stDownloadButton button:hover {background:#4f82b3!important; border-color:#3f719f!important;}
       @media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
     </style>
     """,
@@ -119,9 +132,9 @@ def add_province_boundaries(fmap):
         folium.GeoJson(
             get_province_geojson(),
             name="Provincial boundaries",
-            style_function=lambda feature: {"color": "#111827", "weight": 1.2, "fillOpacity": 0.0, "opacity": 0.95},
-            highlight_function=lambda feature: {"color": "#facc15", "weight": 2.5, "fillOpacity": 0.04},
-            tooltip=folium.GeoJsonTooltip(fields=["ADM1_NAME"], aliases=["Province"], sticky=True, labels=True, style="background:white;color:#111827;font-size:12px;padding:4px;"),
+            style_function=lambda feature: {"color": "#102a43", "weight": 1.2, "fillOpacity": 0.0, "opacity": 0.95},
+            highlight_function=lambda feature: {"color": "#fcd116", "weight": 2.5, "fillOpacity": 0.04},
+            tooltip=folium.GeoJsonTooltip(fields=["ADM1_NAME"], aliases=["Province"], sticky=True, labels=True, style="background:white;color:#102a43;font-size:12px;padding:4px;"),
             control=True,
         ).add_to(fmap)
     except Exception:
@@ -250,11 +263,11 @@ def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=24, bottomMargin=24)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("TitleCustom", parent=styles["Title"], fontSize=20, leading=24, textColor=colors.HexColor("#0f3d2e"), spaceAfter=8)
+    title_style = ParagraphStyle("TitleCustom", parent=styles["Title"], fontSize=20, leading=24, textColor=colors.HexColor("#4f82b3"), spaceAfter=8)
     body_style = ParagraphStyle("BodyCustom", parent=styles["BodyText"], fontSize=8.8, leading=11)
     small_style = ParagraphStyle("Small", parent=styles["BodyText"], fontSize=7.6, leading=10, textColor=colors.HexColor("#667085"))
     story = [Paragraph("PNG Live Processing Workspace: Map and Methodology Report", title_style), Paragraph(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", small_style), Spacer(1, 6)]
-    story.append(Table([["Selected layer", layer_name], ["Drought data period", drought_period], ["Frost screening period", frost_period], ["Purpose", "Technical review, map inspection, export preparation, and field verification planning."]], colWidths=[145, 575], style=[("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#ecfdf5")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0f3d2e")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")), ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+    story.append(Table([["Selected layer", layer_name], ["Drought data period", drought_period], ["Frost screening period", frost_period], ["Purpose", "Technical review, map inspection, export preparation, and field verification planning."]], colWidths=[145, 575], style=[("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e7f1fb")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#102a43")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#9ebdd8")), ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#c7d9ea")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Map output", styles["Heading2"]))
     if map_image_path and os.path.exists(map_image_path):
@@ -269,9 +282,9 @@ def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, 
 
 st.markdown("""
 <div class="hero">
-  <div class="eyebrow">FAO PNG climate-risk technical workspace</div>
+  <div class="eyebrow">PNG Earth Map aligned technical workspace</div>
   <h1>PNG Live Processing Workspace</h1>
-  <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The public dashboard remains the briefing layer; EarthMap remains the broader FAO geospatial exploration platform.</div>
+  <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The visual theme is aligned with the PNG Earth Map interface while the public dashboard remains the briefing layer.</div>
 </div>
 """, unsafe_allow_html=True)
 
