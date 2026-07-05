@@ -259,6 +259,45 @@ def make_table_summary(df):
     return f"For the selected period, {severe_or_moderate} provinces fall in moderate or severe rainfall deficit classes, while {frost_watch} provinces show a highland cold-temperature signal. Lowest rainfall percentage of normal: {', '.join(driest) if driest else 'no data'}. Coldest highland nighttime LST signal: {', '.join(coldest) if coldest else 'no data'}."
 
 
+def build_live_processing_status_payload(
+    summary_df: pd.DataFrame,
+    analysis_date,
+    drought_period: str,
+    frost_period: str,
+):
+    province_summary = []
+
+    for _, row in summary_df.iterrows():
+        rainfall_val = row.get("Rainfall % normal")
+        lst_val = row.get("Mean night LST °C")
+
+        province_summary.append(
+            {
+                "province": row.get("Province"),
+                "rainfall_pct_normal": None if pd.isna(rainfall_val) else float(rainfall_val),
+                "drought_interpretation": row.get("Drought interpretation"),
+                "mean_night_lst_c": None if pd.isna(lst_val) else float(lst_val),
+                "frost_interpretation": row.get("Frost interpretation"),
+            }
+        )
+
+    return {
+        "generated_utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "analysis_date": str(analysis_date),
+        "drought_window": drought_period,
+        "frost_window": frost_period,
+        "workspace_url": "https://png-climate-workspace-v1.streamlit.app/",
+        "notes": "Live PNG drought and frost screening workspace summary from the separate Streamlit/GEE processing workflow.",
+        "available_layers": ["Drought", "Frost", "Both"],
+        "province_summary": province_summary,
+    }
+
+
+def status_payload_to_json_bytes(payload: dict) -> bytes:
+    return json.dumps(payload, indent=2).encode("utf-8")
+
+
+
 def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, map_image_path=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=24, bottomMargin=24)
@@ -372,13 +411,46 @@ m = build_map(mode, rain_img, frost_img, rainfall_vis, frost_vis, opacity, for_p
 st_folium(m, width=None, height=720)
 
 st.subheader("Provincial drought and frost summary")
-st.markdown(f"""<div class="premium-card"><b>About this table:</b> The table summarises the selected map date, using provincial polygons to calculate average rainfall percentage of normal and mean highland nighttime land surface temperature. It is intended for screening and prioritisation, not as a confirmed impact assessment. Selected analysis date: <b>{selected_today.strftime('%d %b %Y')}</b>.</div>""", unsafe_allow_html=True)
+st.markdown(
+    f"""<div class="premium-card"><b>About this table:</b> The table summarises the selected map date, using provincial polygons to calculate average rainfall percentage of normal and mean highland nighttime land surface temperature. It is intended for screening and prioritisation, not as a confirmed impact assessment. Selected analysis date: <b>{selected_today.strftime('%d %b %Y')}</b>.</div>""",
+    unsafe_allow_html=True,
+)
 try:
     summary_df = provincial_summary(str(start_90), str(safe_end), str(start_7), str(selected_today))
     st.info(make_table_summary(summary_df))
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    st.download_button("Download provincial summary CSV", data=summary_df.to_csv(index=False).encode("utf-8"), file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv", mime="text/csv")
+
+    col_csv, col_json = st.columns(2)
+
+    with col_csv:
+        st.download_button(
+            "Download provincial summary CSV",
+            data=summary_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv",
+            mime="text/csv",
+        )
+
+    status_payload = build_live_processing_status_payload(
+        summary_df=summary_df,
+        analysis_date=selected_today,
+        drought_period=drought_period,
+        frost_period=frost_period,
+    )
+
+    with col_json:
+        st.download_button(
+            "Download homepage overview JSON",
+            data=status_payload_to_json_bytes(status_payload),
+            file_name="live_processing_status.json",
+            mime="application/json",
+        )
+
+    st.caption(
+        "Use the JSON download to update gisnexus/data/live_processing_status.json so the homepage overview mirrors this Streamlit provincial summary."
+    )
 except Exception:
-    st.info("Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing.")
+    st.info(
+        "Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing."
+    )
 
 st.markdown("""<div class="premium-card"><b>Operational note:</b> Use the date selector to review earlier drought/frost screening windows, switch data layers, inspect provincial boundaries, export GeoTIFF data, and download a provincial summary table. Final response decisions should be supported by field verification and official assessment channels.</div>""", unsafe_allow_html=True)
