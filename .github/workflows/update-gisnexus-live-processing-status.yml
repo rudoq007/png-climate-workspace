@@ -1,0 +1,77 @@
+name: Update gisnexus live processing status
+
+on:
+  workflow_dispatch:
+    inputs:
+      anchor_date:
+        description: Optional analysis date in YYYY-MM-DD format. Leave blank to use today in UTC.
+        required: false
+        type: string
+  schedule:
+    - cron: '30 1 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-live-processing-status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout png-climate-workspace
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install earthengine-api
+
+      - name: Prepare Earth Engine credentials
+        env:
+          EARTHENGINE_SERVICE_ACCOUNT_JSON: ${{ secrets.EARTHENGINE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$EARTHENGINE_SERVICE_ACCOUNT_JSON" || (echo "Missing secret EARTHENGINE_SERVICE_ACCOUNT_JSON" && exit 1)
+          printf '%s' "$EARTHENGINE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/ee-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/ee-service-account.json" >> "$GITHUB_ENV"
+          python - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          with open(os.environ['RUNNER_TEMP'] + '/ee-service-account.json', encoding='utf-8') as f:
+              info = json.load(f)
+          print('EARTHENGINE_PROJECT=' + info.get('project_id', 'trekky675'))
+          PY
+
+      - name: Build live processing status JSON
+        env:
+          ANCHOR_DATE: ${{ inputs.anchor_date }}
+        run: |
+          if [ -n "$ANCHOR_DATE" ]; then
+            python scripts/build_live_processing_status.py --output "$RUNNER_TEMP/live_processing_status.json" --anchor-date "$ANCHOR_DATE"
+          else
+            python scripts/build_live_processing_status.py --output "$RUNNER_TEMP/live_processing_status.json"
+          fi
+
+      - name: Checkout gisnexus target repo
+        uses: actions/checkout@v4
+        with:
+          repository: rudoq007/gisnexus
+          token: ${{ secrets.GISNEXUS_PUSH_TOKEN }}
+          path: gisnexus
+
+      - name: Copy JSON into gisnexus
+        run: |
+          mkdir -p gisnexus/data
+          cp "$RUNNER_TEMP/live_processing_status.json" gisnexus/data/live_processing_status.json
+
+      - name: Commit and push updated status
+        run: |
+          cd gisnexus
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/live_processing_status.json
+          git diff --cached --quiet || git commit -m "Update live processing status from png-climate-workspace"
+          git push
