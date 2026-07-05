@@ -1,0 +1,49 @@
+name: Add homepage JSON export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/add-homepage-json-export.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Streamlit app
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          helper_anchor = '\n\n\ndef make_pdf_report(layer_name, drought_period, frost_period, methodology_text, map_image_path=None):\n'
+          helper_block = '''\n\n\ndef build_live_processing_status_payload(\n    summary_df: pd.DataFrame,\n    analysis_date,\n    drought_period: str,\n    frost_period: str,\n):\n    province_summary = []\n\n    for _, row in summary_df.iterrows():\n        rainfall_val = row.get("Rainfall % normal")\n        lst_val = row.get("Mean night LST °C")\n\n        province_summary.append(\n            {\n                "province": row.get("Province"),\n                "rainfall_pct_normal": None if pd.isna(rainfall_val) else float(rainfall_val),\n                "drought_interpretation": row.get("Drought interpretation"),\n                "mean_night_lst_c": None if pd.isna(lst_val) else float(lst_val),\n                "frost_interpretation": row.get("Frost interpretation"),\n            }\n        )\n\n    return {\n        "generated_utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),\n        "analysis_date": str(analysis_date),\n        "drought_window": drought_period,\n        "frost_window": frost_period,\n        "workspace_url": "https://png-climate-workspace-v1.streamlit.app/",\n        "notes": "Live PNG drought and frost screening workspace summary from the separate Streamlit/GEE processing workflow.",\n        "available_layers": ["Drought", "Frost", "Both"],\n        "province_summary": province_summary,\n    }\n\n\ndef status_payload_to_json_bytes(payload: dict) -> bytes:\n    return json.dumps(payload, indent=2).encode("utf-8")\n''' + helper_anchor
+
+          if 'def build_live_processing_status_payload(' not in s:
+              s = s.replace(helper_anchor, helper_block)
+
+          old_block = '''st.subheader("Provincial drought and frost summary")\nst.markdown(f"""<div class="premium-card"><b>About this table:</b> The table summarises the selected map date, using provincial polygons to calculate average rainfall percentage of normal and mean highland nighttime land surface temperature. It is intended for screening and prioritisation, not as a confirmed impact assessment. Selected analysis date: <b>{selected_today.strftime('%d %b %Y')}</b>.</div>""", unsafe_allow_html=True)\ntry:\n    summary_df = provincial_summary(str(start_90), str(safe_end), str(start_7), str(selected_today))\n    st.info(make_table_summary(summary_df))\n    st.dataframe(summary_df, use_container_width=True, hide_index=True)\n    st.download_button("Download provincial summary CSV", data=summary_df.to_csv(index=False).encode("utf-8"), file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv", mime="text/csv")\nexcept Exception:\n    st.info("Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing.")\n'''
+
+          new_block = '''st.subheader("Provincial drought and frost summary")\nst.markdown(\n    f"""<div class="premium-card"><b>About this table:</b> The table summarises the selected map date, using provincial polygons to calculate average rainfall percentage of normal and mean highland nighttime land surface temperature. It is intended for screening and prioritisation, not as a confirmed impact assessment. Selected analysis date: <b>{selected_today.strftime('%d %b %Y')}</b>.</div>""",\n    unsafe_allow_html=True,\n)\ntry:\n    summary_df = provincial_summary(str(start_90), str(safe_end), str(start_7), str(selected_today))\n    st.info(make_table_summary(summary_df))\n    st.dataframe(summary_df, use_container_width=True, hide_index=True)\n\n    col_csv, col_json = st.columns(2)\n\n    with col_csv:\n        st.download_button(\n            "Download provincial summary CSV",\n            data=summary_df.to_csv(index=False).encode("utf-8"),\n            file_name=f"PNG_provincial_drought_frost_summary_{selected_today}.csv",\n            mime="text/csv",\n        )\n\n    status_payload = build_live_processing_status_payload(\n        summary_df=summary_df,\n        analysis_date=selected_today,\n        drought_period=drought_period,\n        frost_period=frost_period,\n    )\n\n    with col_json:\n        st.download_button(\n            "Download homepage overview JSON",\n            data=status_payload_to_json_bytes(status_payload),\n            file_name="live_processing_status.json",\n            mime="application/json",\n        )\n\n    st.caption(\n        "Use the JSON download to update gisnexus/data/live_processing_status.json so the homepage overview mirrors this Streamlit provincial summary."\n    )\nexcept Exception:\n    st.info(\n        "Provincial summary is not available yet. Try refreshing the app or using a coarser export scale after Earth Engine finishes processing."\n    )\n'''
+
+          if 'Download homepage overview JSON' not in s:
+              s = s.replace(old_block, new_block)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit app update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git diff --cached --quiet || git commit -m "Add homepage overview JSON export"
+          git push
