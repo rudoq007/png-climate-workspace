@@ -1,0 +1,47 @@
+name: Add PNG flag to Streamlit header
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/add-png-flag-streamlit-header.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add PNG flag to Streamlit hero
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          old_css = '.hero h1 {font-size:42px; line-height:1.05; letter-spacing:-.045em; margin:8px 0;}\n      .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#eef7ff!important;}\n      .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#f8fbfd!important;}'
+          new_css = '.hero-title-row {display:flex; align-items:center; gap:14px; flex-wrap:wrap;}\n      .hero-flag {width:56px; height:auto; border-radius:6px; border:1px solid rgba(255,255,255,.35); box-shadow:0 4px 12px rgba(0,0,0,.18); background:#fff;}\n      .hero h1 {font-size:42px; line-height:1.05; letter-spacing:-.045em; margin:8px 0;}\n      .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#eef7ff!important;}\n      .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#f8fbfd!important;}'
+          s = s.replace(old_css, new_css)
+
+          old_media = '@media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}'
+          new_media = '@media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}.hero-title-row{align-items:flex-start}.hero-flag{width:42px}}'
+          s = s.replace(old_media, new_media)
+
+          old_hero = '<div class="hero">\n  <div class="eyebrow">PNG Earth Map aligned technical workspace</div>\n  <h1>PNG Live Processing Workspace</h1>\n  <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The visual theme is aligned with the PNG Earth Map interface while the public dashboard remains the briefing layer.</div>\n</div>'
+          new_hero = '<div class="hero">\n  <div class="eyebrow">PNG Earth Map aligned technical workspace</div>\n  <div class="hero-title-row">\n    <img class="hero-flag" src="https://flagcdn.com/w80/pg.png" alt="Papua New Guinea flag">\n    <h1>PNG Live Processing Workspace</h1>\n  </div>\n  <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The visual theme is aligned with the PNG Earth Map interface while the public dashboard remains the briefing layer.</div>\n</div>'
+          s = s.replace(old_hero, new_hero)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit app update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git diff --cached --quiet || git commit -m "Add PNG flag to Streamlit hero"
+          git push
