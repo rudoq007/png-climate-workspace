@@ -1,0 +1,1 @@
+Added workflow support to place the Papua New Guinea flag in the Streamlit hero header. Run the workflow 'Add PNG flag to Streamlit header' from Actions to patch app.py automatically.
