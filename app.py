@@ -40,6 +40,8 @@ st.markdown(
       .hero * {color:#fff!important;}
       .hero:before {content:""; position:absolute; left:0; right:0; bottom:0; height:5px; background:linear-gradient(90deg,#000000 0%,#d71920 42%,#fcd116 70%,#ffffff 100%); opacity:.95;}
       .hero:after {content:""; position:absolute; width:360px; height:360px; border-radius:999px; right:-130px; top:-150px; background:rgba(255,255,255,.16);}
+      .hero-title-row {display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+      .hero-flag {width:56px; height:auto; border-radius:6px; border:1px solid rgba(255,255,255,.35); box-shadow:0 4px 12px rgba(0,0,0,.18); background:#fff;}
       .hero h1 {font-size:42px; line-height:1.05; letter-spacing:-.045em; margin:8px 0;}
       .eyebrow {text-transform:uppercase; letter-spacing:.14em; font-weight:800; font-size:12px; color:#eef7ff!important;}
       .hero-sub {max-width:1020px; line-height:1.55; font-size:16px; color:#f8fbfd!important;}
@@ -56,7 +58,7 @@ st.markdown(
       iframe {border-radius:16px!important; border:1px solid #c7d9ea!important;}
       .stButton button, .stDownloadButton button {border-radius:12px!important; border:1px solid #4f82b3!important; background:#6699c7!important; color:#ffffff!important; font-weight:700!important;}
       .stButton button:hover, .stDownloadButton button:hover {background:#4f82b3!important; border-color:#3f719f!important;}
-      @media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
+      @media(max-width:1000px){.method-grid{grid-template-columns:1fr}.hero h1{font-size:30px}.hero-title-row{align-items:flex-start}.hero-flag{width:42px}}
     </style>
     """,
     unsafe_allow_html=True,
@@ -322,7 +324,10 @@ def make_pdf_report(layer_name, drought_period, frost_period, methodology_text, 
 st.markdown("""
 <div class="hero">
   <div class="eyebrow">PNG Earth Map aligned technical workspace</div>
-  <h1>PNG Live Processing Workspace</h1>
+  <div class="hero-title-row">
+    <img class="hero-flag" src="https://flagcdn.com/w80/pg.png" alt="Papua New Guinea flag">
+    <h1>PNG Live Processing Workspace</h1>
+  </div>
   <div class="hero-sub">Separate Streamlit workspace for live Google Earth Engine layer review, rainfall and frost screening, map inspection, export preparation, and technical reporting. The visual theme is aligned with the PNG Earth Map interface while the public dashboard remains the briefing layer.</div>
 </div>
 """, unsafe_allow_html=True)
